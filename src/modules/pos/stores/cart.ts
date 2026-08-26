@@ -1,0 +1,332 @@
+import { defineStore } from "pinia";
+import { ref, computed } from "vue";
+import { supabase } from "@/services/supabase";
+import type { CartItem, CartItemModifier } from "@/types";
+import * as paymentService from "@/modules/pos/services/payment";
+
+export const useCartStore = defineStore("cart", () => {
+  const items = ref<CartItem[]>([]);
+  const holdOrderId = ref<string | null>(null);
+  const holdInvoiceNumber = ref<string | null>(null);
+  const orderType = ref<"dine_in" | "takeaway">("dine_in");
+  const notes = ref("");
+
+  // ── Getters ──────────────────────────────────────────────
+
+  const itemCount = computed(() => items.value.reduce((sum, i) => sum + i.quantity, 0));
+
+  const subtotal = computed(() => items.value.reduce((sum, i) => sum + i.subtotal, 0));
+
+  const modifierTotal = computed(() =>
+    items.value.reduce((sum, i) => sum + i.modifier_total * i.quantity, 0),
+  );
+
+  const total = computed(() => subtotal.value + modifierTotal.value);
+
+  const isEmpty = computed(() => items.value.length === 0);
+
+  // ── Helpers ──────────────────────────────────────────────
+
+  function calcItemSubtotal(item: CartItem): number {
+    return (item.unit_price + item.modifier_total) * item.quantity;
+  }
+
+  // ── Actions ──────────────────────────────────────────────
+
+  function addItem(
+    product: { id: string; name: string; selling_price: number; image_url: string | null },
+    modifiers: CartItemModifier[] = [],
+  ) {
+    const modifierKey = modifiers
+      .map((m) => m.option_id)
+      .sort()
+      .join(",");
+
+    // Check if same product + same modifiers already in cart
+    const existing = items.value.find(
+      (i) =>
+        i.product_id === product.id &&
+        i.modifiers
+          .map((m) => m.option_id)
+          .sort()
+          .join(",") === modifierKey,
+    );
+
+    if (existing) {
+      existing.quantity++;
+      existing.subtotal = calcItemSubtotal(existing);
+    } else {
+      const modifierTotal = modifiers.reduce((sum, m) => sum + m.price_adjustment, 0);
+      const newItem: CartItem = {
+        product_id: product.id,
+        product_name: product.name,
+        product_price: product.selling_price,
+        image_url: product.image_url,
+        quantity: 1,
+        unit_price: product.selling_price,
+        modifiers,
+        modifier_total: modifierTotal,
+        notes: "",
+        subtotal: product.selling_price + modifierTotal,
+      };
+      items.value.push(newItem);
+    }
+  }
+
+  function removeItem(index: number) {
+    items.value.splice(index, 1);
+  }
+
+  function updateQuantity(index: number, qty: number) {
+    if (qty <= 0) {
+      removeItem(index);
+      return;
+    }
+    const item = items.value[index];
+    if (item) {
+      item.quantity = qty;
+      item.subtotal = calcItemSubtotal(item);
+    }
+  }
+
+  function incrementQuantity(index: number) {
+    const item = items.value[index];
+    if (item) {
+      item.quantity++;
+      item.subtotal = calcItemSubtotal(item);
+    }
+  }
+
+  function decrementQuantity(index: number) {
+    const item = items.value[index];
+    if (item) {
+      if (item.quantity <= 1) {
+        removeItem(index);
+      } else {
+        item.quantity--;
+        item.subtotal = calcItemSubtotal(item);
+      }
+    }
+  }
+
+  function setItemNotes(index: number, note: string) {
+    const item = items.value[index];
+    if (item) item.notes = note;
+  }
+
+  function clearCart() {
+    items.value = [];
+    holdOrderId.value = null;
+    holdInvoiceNumber.value = null;
+    notes.value = "";
+  }
+
+  // ── Hold / Resume (Draft Order) ──────────────────────────
+
+  async function holdOrder(): Promise<{ success: boolean; error?: string }> {
+    if (items.value.length === 0) return { success: false, error: "Cart is empty" };
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    // If resuming a held order, delete old items first
+    if (holdOrderId.value) {
+      await supabase
+        .from("order_item_modifiers")
+        .delete()
+        .in(
+          "order_item_id",
+          (
+            await supabase.from("order_items").select("id").eq("order_id", holdOrderId.value)
+          ).data?.map((i) => i.id) ?? [],
+        );
+      await supabase.from("order_items").delete().eq("order_id", holdOrderId.value);
+    }
+
+    const orderData = {
+      order_type: orderType.value,
+      cashier_id: user?.id ?? null,
+      status: "draft" as const,
+      subtotal: subtotal.value,
+      discount: 0,
+      tax: 0,
+      service_charge: 0,
+      total: total.value,
+      notes: notes.value || null,
+    };
+
+    let orderId = holdOrderId.value;
+
+    if (orderId) {
+      // Update existing draft
+      const { error } = await supabase.from("orders").update(orderData).eq("id", orderId);
+      if (error) return { success: false, error: error.message };
+    } else {
+      // Create new draft
+      const { data, error } = await supabase
+        .from("orders")
+        .insert(orderData)
+        .select("id, invoice_number")
+        .single();
+      if (error) return { success: false, error: error.message };
+      orderId = data.id;
+      holdOrderId.value = data.id;
+      holdInvoiceNumber.value = data.invoice_number;
+    }
+
+    // Insert order items
+    for (const item of items.value) {
+      const { data: orderItem, error: itemError } = await supabase
+        .from("order_items")
+        .insert({
+          order_id: orderId,
+          product_id: item.product_id,
+          product_name: item.product_name,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          modifier_total: item.modifier_total,
+          discount: 0,
+          subtotal: item.subtotal,
+          notes: item.notes || null,
+          status: "pending",
+        })
+        .select("id")
+        .single();
+
+      if (itemError) return { success: false, error: itemError.message };
+
+      // Insert modifier selections
+      if (item.modifiers.length > 0 && orderItem) {
+        const modifierRows = item.modifiers.map((m) => ({
+          order_item_id: orderItem.id,
+          modifier_option_id: m.option_id,
+          price_adjustment: m.price_adjustment,
+        }));
+        const { error: modError } = await supabase
+          .from("order_item_modifiers")
+          .insert(modifierRows);
+        if (modError) return { success: false, error: modError.message };
+      }
+    }
+
+    return { success: true };
+  }
+
+  async function resumeDraftOrders(): Promise<
+    { id: string; invoice_number: string | null; item_count: number; total: number }[]
+  > {
+    const { data: orders, error } = await supabase
+      .from("orders")
+      .select("id, invoice_number, total, order_items(id)")
+      .eq("status", "draft")
+      .order("created_at", { ascending: false });
+
+    if (error || !orders) return [];
+
+    return orders.map((o) => ({
+      id: o.id,
+      invoice_number: o.invoice_number,
+      item_count: o.order_items?.length ?? 0,
+      total: o.total,
+    }));
+  }
+
+  async function resumeOrder(orderId: string): Promise<{ success: boolean; error?: string }> {
+    // Load order
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("*, order_items(*, order_item_modifiers(*, modifier_option(*)))")
+      .eq("id", orderId)
+      .single();
+
+    if (orderError || !order) return { success: false, error: "Order not found" };
+
+    // Clear current cart
+    clearCart();
+
+    // Set order info
+    holdOrderId.value = order.id;
+    holdInvoiceNumber.value = order.invoice_number;
+    orderType.value = order.order_type;
+    notes.value = order.notes ?? "";
+
+    // Load items into cart
+    for (const oi of order.order_items ?? []) {
+      const modifiers: CartItemModifier[] = (oi.order_item_modifiers ?? []).map(
+        (oim: {
+          modifier_option_id: string;
+          price_adjustment: number;
+          modifier_option?: { name: string };
+        }) => ({
+          option_id: oim.modifier_option_id,
+          option_name: oim.modifier_option?.name ?? "",
+          price_adjustment: oim.price_adjustment,
+        }),
+      );
+
+      const modifierTotal = modifiers.reduce((sum, m) => sum + m.price_adjustment, 0);
+
+      items.value.push({
+        product_id: oi.product_id,
+        product_name: oi.product?.name ?? "Unknown",
+        product_price: oi.unit_price,
+        image_url: oi.product?.image_url ?? null,
+        quantity: oi.quantity,
+        unit_price: oi.unit_price,
+        modifiers,
+        modifier_total: modifierTotal,
+        notes: oi.notes ?? "",
+        subtotal: oi.subtotal,
+      });
+    }
+
+    return { success: true };
+  }
+
+  // ── Confirm Order (DRAFT → CONFIRMED) ──────────────────────
+
+  async function confirmOrder(
+    tableId?: string,
+  ): Promise<{ success: boolean; invoice_number?: string; error?: string }> {
+    if (items.value.length === 0) return { success: false, error: "Cart is empty" };
+
+    // If no held order yet, hold first
+    if (!holdOrderId.value) {
+      const holdResult = await holdOrder();
+      if (!holdResult.success) return { success: false, error: holdResult.error };
+    }
+
+    // Confirm via RPC (sets invoice#, table to OCCUPIED)
+    const result = await paymentService.confirmOrder(holdOrderId.value!, tableId);
+    if (!result.success) return { success: false, error: result.error };
+
+    // Clear cart after successful confirm
+    clearCart();
+    return { success: true, invoice_number: result.invoice_number };
+  }
+
+  return {
+    items,
+    holdOrderId,
+    holdInvoiceNumber,
+    orderType,
+    notes,
+    itemCount,
+    subtotal,
+    modifierTotal,
+    total,
+    isEmpty,
+    addItem,
+    removeItem,
+    updateQuantity,
+    incrementQuantity,
+    decrementQuantity,
+    setItemNotes,
+    clearCart,
+    holdOrder,
+    resumeDraftOrders,
+    resumeOrder,
+    confirmOrder,
+  };
+});

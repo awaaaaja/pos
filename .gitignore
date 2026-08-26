@@ -1,0 +1,32 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build
+dist
+dist-ssr
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# OS
+.DS_Store
+*.local
+
+# Env — only ignore local overrides (may contain secrets)
+.env.local
+.env.*.local
+
+# Supabase
+supabase/.temp
