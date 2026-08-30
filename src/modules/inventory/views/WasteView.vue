@@ -3,9 +3,11 @@ import { ref, onMounted } from "vue";
 import { CircleCheck } from "lucide-vue-next";
 import { supabase } from "@/services/supabase";
 import { useAuthStore } from "@/modules/auth/stores/auth";
+import { useToast } from "@/composables/useToast";
 import type { Product } from "@/types";
 
 const auth = useAuthStore();
+const toast = useToast();
 const products = ref<Product[]>([]);
 const loading = ref(false);
 const submitting = ref(false);
@@ -42,7 +44,7 @@ async function handleSubmit() {
   submitting.value = false;
 
   if (error || data?.error) {
-    alert(error?.message || data?.error || "Failed");
+    toast.error(error?.message || data?.error || "Failed");
     return;
   }
 

@@ -21,7 +21,7 @@ const outletId = computed(() => auth.user?.profile.outlet_id ?? "");
 
 onMounted(() => {
   if (cashierId.value) {
-    shift.fetchOpenShift(cashierId.value);
+    shift.fetchOpenShift(cashierId.value, outletId.value);
   }
 });
 

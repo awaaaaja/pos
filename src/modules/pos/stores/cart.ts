@@ -11,6 +11,20 @@ export const useCartStore = defineStore("cart", () => {
   const orderType = ref<"dine_in" | "takeaway">("dine_in");
   const notes = ref("");
 
+  // Settings (tax/service charge) — loaded from DB
+  const taxPercent = ref(0);
+  const serviceChargePercent = ref(0);
+  const taxEnabled = ref(false);
+  const serviceChargeEnabled = ref(false);
+
+  // Discount state
+  const discount = ref(0);
+  const discountType = ref<string | null>(null); // "manual" | "coupon" | "promo"
+  const couponCode = ref("");
+  const couponId = ref<string | null>(null);
+  const promoId = ref<string | null>(null);
+  const customerId = ref<string | null>(null);
+
   // ── Getters ──────────────────────────────────────────────
 
   const itemCount = computed(() => items.value.reduce((sum, i) => sum + i.quantity, 0));
@@ -21,7 +35,16 @@ export const useCartStore = defineStore("cart", () => {
     items.value.reduce((sum, i) => sum + i.modifier_total * i.quantity, 0),
   );
 
-  const total = computed(() => subtotal.value + modifierTotal.value);
+  const tax = computed(() =>
+    taxEnabled.value ? Math.round(subtotal.value * taxPercent.value) : 0,
+  );
+
+  const serviceCharge = computed(() =>
+    serviceChargeEnabled.value ? Math.round(subtotal.value * serviceChargePercent.value) : 0,
+  );
+
+  // ponytail: subtotal already includes modifier_total via calcItemSubtotal
+  const total = computed(() => Math.max(0, subtotal.value - discount.value + tax.value + serviceCharge.value));
 
   const isEmpty = computed(() => items.value.length === 0);
 
@@ -119,6 +142,58 @@ export const useCartStore = defineStore("cart", () => {
     holdOrderId.value = null;
     holdInvoiceNumber.value = null;
     notes.value = "";
+    clearDiscount();
+  }
+
+  // ── Settings ──────────────────────────────────────────────
+
+  async function loadSettings(outletId: string) {
+    const { data } = await supabase.rpc("get_settings", { p_outlet_id: outletId });
+    if (!data) return;
+    for (const row of data as { key: string; value: Record<string, unknown> }[]) {
+      if (row.key === "tax") {
+        taxPercent.value = ((row.value.percent as number) || 0) / 100;
+        taxEnabled.value = (row.value.enabled as boolean) ?? false;
+      }
+      if (row.key === "service_charge") {
+        serviceChargePercent.value = ((row.value.percent as number) || 0) / 100;
+        serviceChargeEnabled.value = (row.value.enabled as boolean) ?? false;
+      }
+    }
+  }
+
+  // ── Discount / Coupon ──────────────────────────────────────
+
+  function applyManualDiscount(amount: number) {
+    discount.value = Math.min(amount, subtotal.value);
+    discountType.value = "manual";
+    couponCode.value = "";
+    couponId.value = null;
+    promoId.value = null;
+  }
+
+  async function applyCoupon(code: string): Promise<{ success: boolean; error?: string }> {
+    const { data, error } = await supabase.rpc("validate_coupon", {
+      p_code: code,
+      p_amount: subtotal.value,
+    });
+    if (error) return { success: false, error: error.message };
+    if (data?.error) return { success: false, error: data.error };
+
+    discount.value = data.discount_amount;
+    discountType.value = "coupon";
+    couponCode.value = code;
+    couponId.value = data.coupon_id;
+    promoId.value = data.promo_id;
+    return { success: true };
+  }
+
+  function clearDiscount() {
+    discount.value = 0;
+    discountType.value = null;
+    couponCode.value = "";
+    couponId.value = null;
+    promoId.value = null;
   }
 
   // ── Hold / Resume (Draft Order) ──────────────────────────
@@ -129,6 +204,10 @@ export const useCartStore = defineStore("cart", () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
+
+    // Get outlet_id from profile
+    const { data: profile } = await supabase.from("profiles").select("outlet_id").eq("id", user?.id).single();
+    const outletId = profile?.outlet_id ?? null;
 
     // If resuming a held order, delete old items first
     if (holdOrderId.value) {
@@ -147,11 +226,16 @@ export const useCartStore = defineStore("cart", () => {
     const orderData = {
       order_type: orderType.value,
       cashier_id: user?.id ?? null,
+      outlet_id: outletId,
+      customer_id: customerId.value,
       status: "draft" as const,
       subtotal: subtotal.value,
-      discount: 0,
-      tax: 0,
-      service_charge: 0,
+      discount: discount.value,
+      discount_type: discountType.value,
+      coupon_id: couponId.value,
+      promo_id: promoId.value,
+      tax: tax.value,
+      service_charge: serviceCharge.value,
       total: total.value,
       notes: notes.value || null,
     };
@@ -216,11 +300,21 @@ export const useCartStore = defineStore("cart", () => {
   async function resumeDraftOrders(): Promise<
     { id: string; invoice_number: string | null; item_count: number; total: number }[]
   > {
-    const { data: orders, error } = await supabase
+    // Get current user's outlet_id
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: profile } = await supabase.from("profiles").select("outlet_id").eq("id", user?.id).single();
+
+    let query = supabase
       .from("orders")
       .select("id, invoice_number, total, order_items(id)")
       .eq("status", "draft")
       .order("created_at", { ascending: false });
+
+    if (profile?.outlet_id) {
+      query = query.eq("outlet_id", profile.outlet_id);
+    }
+
+    const { data: orders, error } = await query;
 
     if (error || !orders) return [];
 
@@ -315,8 +409,18 @@ export const useCartStore = defineStore("cart", () => {
     itemCount,
     subtotal,
     modifierTotal,
+    discount,
+    discountType,
+    couponCode,
+    customerId,
+    tax,
+    serviceCharge,
     total,
     isEmpty,
+    loadSettings,
+    applyManualDiscount,
+    applyCoupon,
+    clearDiscount,
     addItem,
     removeItem,
     updateQuantity,

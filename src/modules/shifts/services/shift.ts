@@ -1,14 +1,18 @@
 import { supabase } from "@/services/supabase";
 import type { ApiResponse, Shift, CashMovement, CashMovementType } from "@/types";
 
-export async function getOpenShift(cashierId: string): Promise<ApiResponse<Shift>> {
-  const { data, error } = await supabase
+export async function getOpenShift(cashierId: string, outletId?: string): Promise<ApiResponse<Shift>> {
+  let query = supabase
     .from("shifts")
     .select("*")
     .eq("cashier_id", cashierId)
-    .eq("status", "open")
-    .limit(1)
-    .maybeSingle();
+    .eq("status", "open");
+
+  if (outletId) {
+    query = query.eq("outlet_id", outletId);
+  }
+
+  const { data, error } = await query.limit(1).maybeSingle();
 
   if (error) return { data: null, error: error.message };
   return { data, error: null };

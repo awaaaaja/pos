@@ -44,9 +44,9 @@ export const useShiftStore = defineStore("shift", () => {
     );
   });
 
-  async function fetchOpenShift(cashierId: string) {
+  async function fetchOpenShift(cashierId: string, outletId?: string) {
     loading.value = true;
-    const result = await getOpenShift(cashierId);
+    const result = await getOpenShift(cashierId, outletId);
     currentShift.value = result.data;
     if (result.data) {
       const movResult = await getCashMovements(result.data.id);
@@ -63,7 +63,7 @@ export const useShiftStore = defineStore("shift", () => {
       error.value = result.error || "Failed to open shift";
       return false;
     }
-    await fetchOpenShift(cashierId);
+    await fetchOpenShift(cashierId, outletId);
     return true;
   }
 

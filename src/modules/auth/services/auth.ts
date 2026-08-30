@@ -1,5 +1,5 @@
 import { supabase } from "@/services/supabase";
-import type { Profile, ApiResponse } from "@/types";
+import type { Profile, ApiResponse, UserRole } from "@/types";
 
 export interface AuthUser {
   id: string;
@@ -79,11 +79,14 @@ export async function loginByPin(pin: string): Promise<ApiResponse<AuthUser>> {
     return { data: null, error: "Invalid PIN" };
   }
 
-  const profile = rows as unknown as Profile & { email: string };
+  // RPC no longer returns pin_code (security fix)
+  const pinUser = rows as { id: string; full_name: string; role: string; outlet_id: string; is_active: boolean; created_at: string };
 
   // Create real Supabase Auth session so RLS policies pass
+  // Email pattern: {role}@kopipos.local (seeded in auth.users)
+  const email = `${pinUser.role}@kopipos.local`;
   const { error: signInError } = await supabase.auth.signInWithPassword({
-    email: profile.email,
+    email,
     password: pin,
   });
 
@@ -91,9 +94,21 @@ export async function loginByPin(pin: string): Promise<ApiResponse<AuthUser>> {
     return { data: null, error: "Login failed: " + signInError.message };
   }
 
+  // Build profile object (without pin_code hash)
+  const profile: Profile = {
+    id: pinUser.id,
+    full_name: pinUser.full_name,
+    pin_code: null,
+    role: pinUser.role as UserRole,
+    outlet_id: pinUser.outlet_id,
+    is_active: pinUser.is_active,
+    created_at: pinUser.created_at,
+    updated_at: pinUser.created_at,
+  };
+
   return {
     data: {
-      id: profile.id,
+      id: pinUser.id,
       profile,
     },
     error: null,

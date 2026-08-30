@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { useAuthStore } from "@/modules/auth/stores/auth";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -150,7 +151,40 @@ const router = createRouter({
         },
       ],
     },
+    // 404 catch-all
+    {
+      path: "/:pathMatch(.*)*",
+      redirect: "/login",
+    },
   ],
+});
+
+// Navigation guard: auth + role check
+router.beforeEach(async (to) => {
+  const authStore = useAuthStore();
+
+  // Skip auth check for public routes
+  if (to.meta.requiresAuth === false) return true;
+
+  // Wait for auth to initialize if needed
+  if (!authStore.user && !authStore.loading) {
+    await authStore.init();
+  }
+
+  // Not logged in → redirect to login
+  if (!authStore.user) {
+    return { name: "login" };
+  }
+
+  // Check role — walk up matched routes to find parent meta
+  const requiredRole = to.matched.find((r) => r.meta.role)?.meta.role as string | undefined;
+  if (requiredRole && authStore.user?.profile.role !== requiredRole) {
+    // Redirect to their own dashboard
+    const role = authStore.user.profile.role;
+    return { path: role === "owner" ? "/owner" : role === "cashier" ? "/cashier" : "/kds" };
+  }
+
+  return true;
 });
 
 export default router;

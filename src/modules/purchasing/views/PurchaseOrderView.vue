@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { X } from "lucide-vue-next";
+import { useToast } from "@/composables/useToast";
 import {
   getPOs,
   createPO,
@@ -18,6 +19,7 @@ import type { PurchaseOrder } from "@/types";
 const supplierStore = useSupplierStore();
 const productStore = useProductStore();
 const auth = useAuthStore();
+const toast = useToast();
 
 const pos = ref<PurchaseOrder[]>([]);
 const loading = ref(false);
@@ -91,7 +93,7 @@ async function handleCreatePO() {
   }));
   const r = await createPO(poForm.value.supplier_id, items, poForm.value.notes);
   if (r.error) {
-    alert(r.error);
+    toast.error(r.error);
     return;
   }
   showCreateModal.value = false;
@@ -101,14 +103,14 @@ async function handleCreatePO() {
 async function handleApprove(id: string) {
   if (!confirm("Approve this PO?")) return;
   const r = await approvePO(id);
-  if (r.error) alert(r.error);
+  if (r.error) toast.error(r.error);
   await fetch();
 }
 
 async function handleOrder(id: string) {
   if (!confirm("Mark as ordered?")) return;
   const r = await orderPO(id);
-  if (r.error) alert(r.error);
+  if (r.error) toast.error(r.error);
   await fetch();
 }
 
@@ -134,7 +136,7 @@ async function handleReceive() {
     outletId,
   );
   if (r.error) {
-    alert(r.error);
+    toast.error(r.error);
     return;
   }
   const updated = await getPO(selectedPO.value.id);

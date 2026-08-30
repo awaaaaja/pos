@@ -11,8 +11,12 @@ interface TableRecord {
   updated_at: string;
 }
 
-export async function getTables(): Promise<ApiResponse<TableRecord[]>> {
-  const { data, error } = await supabase.from("tables").select("*").order("number");
+export async function getTables(outletId?: string): Promise<ApiResponse<TableRecord[]>> {
+  let query = supabase.from("tables").select("*").order("number");
+  if (outletId) {
+    query = query.eq("outlet_id", outletId);
+  }
+  const { data, error } = await query;
 
   if (error) return { data: null, error: error.message };
   return { data, error: null };

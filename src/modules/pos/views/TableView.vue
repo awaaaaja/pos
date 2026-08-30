@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useTableStore } from "@/modules/pos/stores/table";
+import { useToast } from "@/composables/useToast";
 
 const store = useTableStore();
+const toast = useToast();
 
 const showModal = ref(false);
 const editingId = ref<string | null>(null);
@@ -47,7 +49,7 @@ async function handleSubmit() {
     const firstTable = store.tables[0];
     const outletId = firstTable?.outlet_id;
     if (!outletId) {
-      alert("No outlet found. Create an outlet first.");
+      toast.error("No outlet found. Create an outlet first.");
       return;
     }
     await store.addTable({ outlet_id: outletId, ...form.value });

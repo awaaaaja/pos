@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { refundOrder } from "@/modules/pos/services/payment";
+import { refundOrder, createPayment } from "@/modules/pos/services/payment";
 import { useAuthStore } from "@/modules/auth/stores/auth";
 
 const props = defineProps<{
@@ -40,13 +40,16 @@ async function handleRefund() {
   }
 
   const result = await refundOrder(props.orderId, reason.value, auth.user?.id ?? "");
-  loading.value = false;
-
   if (result.error) {
     error.value = result.error;
+    loading.value = false;
     return;
   }
 
+  // Create refund payment record (negative amount for accounting)
+  await createPayment(props.orderId, "cash", -props.amount, `REFUND: ${reason.value}`);
+
+  loading.value = false;
   emit("refunded");
 }
 </script>

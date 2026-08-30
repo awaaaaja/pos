@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { supabase } from "@/services/supabase";
+import { useAuthStore } from "@/modules/auth/stores/auth";
 import { Calendar } from "lucide-vue-next";
 
 interface SaleRow {
@@ -10,20 +11,30 @@ interface SaleRow {
   avg: number;
 }
 
+const auth = useAuthStore();
 const rows = ref<SaleRow[]>([]);
 const loading = ref(false);
-const period = ref<"daily" | "weekly" | "monthly">("daily");
 const dateFrom = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
 const dateTo = ref(new Date().toISOString().slice(0, 10));
 
 async function load() {
   loading.value = true;
-  const { data } = await supabase
+  const isOwner = auth.user?.profile.role === "owner";
+  const outletId = auth.user?.profile.outlet_id;
+
+  let query = supabase
     .from("orders")
     .select("created_at, total")
     .gte("created_at", dateFrom.value)
     .lte("created_at", dateTo.value + "T23:59:59")
     .in("status", ["completed"]);
+
+  // Non-owner users only see their outlet's data
+  if (!isOwner && outletId) {
+    query = query.eq("outlet_id", outletId);
+  }
+
+  const { data } = await query;
 
   const map = new Map<string, { orders: number; revenue: number }>();
   for (const o of data ?? []) {

@@ -4,6 +4,8 @@ import { useRouter } from "vue-router";
 import { useCartStore } from "@/modules/pos/stores/cart";
 import { useCategoryStore } from "@/modules/products/stores/category";
 import { useProductStore } from "@/modules/products/stores/product";
+import { useAuthStore } from "@/modules/auth/stores/auth";
+import { useToast } from "@/composables/useToast";
 import { getModifiersByProduct } from "@/modules/pos/services/modifier";
 import ModifierDrawer from "@/modules/pos/components/ModifierDrawer.vue";
 import ScanBarcode from "@/modules/barcode/components/ScanBarcode.vue";
@@ -12,6 +14,8 @@ import type { ModifierWithOptions, CartItemModifier } from "@/types";
 
 const router = useRouter();
 const cart = useCartStore();
+const toast = useToast();
+const auth = useAuthStore();
 const categoryStore = useCategoryStore();
 const productStore = useProductStore();
 
@@ -39,9 +43,27 @@ const loadingDrafts = ref(false);
 // Scan
 const showScanner = ref(false);
 
+// Coupon
+const couponInput = ref("");
+
+async function handleApplyCoupon() {
+  const code = couponInput.value.trim();
+  if (!code) return;
+  const result = await cart.applyCoupon(code);
+  if (result.success) {
+    toast.success("Coupon applied!");
+    couponInput.value = "";
+  } else {
+    toast.error(result.error || "Invalid coupon");
+  }
+}
+
 onMounted(() => {
   categoryStore.fetchCategories();
   productStore.fetchProducts();
+  // Load tax/service charge settings from DB
+  const outletId = auth.user?.profile.outlet_id;
+  if (outletId) cart.loadSettings(outletId);
 });
 
 const filteredProducts = computed(() => {
@@ -96,10 +118,10 @@ function onProductFound(product: {
 async function handleHold() {
   const result = await cart.holdOrder();
   if (result.success) {
-    alert(`Order held${cart.holdInvoiceNumber ? ` (${cart.holdInvoiceNumber})` : ""}`);
+    toast.success(`Order held${cart.holdInvoiceNumber ? ` (${cart.holdInvoiceNumber})` : ""}`);
     cart.clearCart();
   } else {
-    alert(result.error || "Failed to hold order");
+    toast.error(result.error || "Failed to hold order");
   }
 }
 
@@ -114,7 +136,7 @@ async function handleResume(orderId: string) {
   const result = await cart.resumeOrder(orderId);
   showResumeModal.value = false;
   if (!result.success) {
-    alert(result.error || "Failed to resume order");
+    toast.error(result.error || "Failed to resume order");
   }
 }
 
@@ -126,14 +148,14 @@ async function handlePayment() {
   // Hold order first (save to DB as DRAFT)
   const holdResult = await cart.holdOrder();
   if (!holdResult.success) {
-    alert(holdResult.error || "Failed to save order");
+    toast.error(holdResult.error || "Failed to save order");
     return;
   }
 
   // Confirm order via RPC (DRAFT → CONFIRMED, generates invoice#)
   const orderId = cart.holdOrderId;
   if (!orderId) {
-    alert("No order to confirm");
+    toast.error("No order to confirm");
     return;
   }
 
@@ -345,9 +367,49 @@ async function handlePayment() {
             <span class="text-secondary">Modifiers</span>
             <span>{{ formatPrice(cart.modifierTotal) }}</span>
           </div>
+
+          <!-- Discount -->
+          <div v-if="cart.discount > 0" class="flex justify-between text-green-600">
+            <span>Discount ({{ cart.discountType }})</span>
+            <span>-{{ formatPrice(cart.discount) }}</span>
+          </div>
+          <div v-if="cart.tax > 0" class="flex justify-between">
+            <span class="text-secondary">Tax</span>
+            <span>{{ formatPrice(cart.tax) }}</span>
+          </div>
+          <div v-if="cart.serviceCharge > 0" class="flex justify-between">
+            <span class="text-secondary">Service</span>
+            <span>{{ formatPrice(cart.serviceCharge) }}</span>
+          </div>
           <div class="flex justify-between border-t pt-1 font-semibold">
             <span>Total</span>
             <span class="text-primary">{{ formatPrice(cart.total) }}</span>
+          </div>
+        </div>
+
+        <!-- Coupon / Discount input -->
+        <div class="mb-3 space-y-2">
+          <div v-if="cart.discount > 0" class="flex items-center justify-between rounded-lg bg-green-50 px-3 py-2 text-sm">
+            <span class="text-green-700">
+              {{ cart.couponCode ? `Coupon: ${cart.couponCode}` : `Manual: ${formatPrice(cart.discount)}` }}
+            </span>
+            <button class="text-green-700 underline" @click="cart.clearDiscount()">Remove</button>
+          </div>
+          <div v-else class="flex gap-2">
+            <input
+              v-model="couponInput"
+              type="text"
+              placeholder="Coupon code"
+              class="flex-1 rounded-lg border px-3 py-2 text-xs uppercase tracking-wider focus:border-primary focus:outline-none"
+              @keyup.enter="handleApplyCoupon"
+            />
+            <button
+              class="rounded-lg bg-primary px-3 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-40"
+              :disabled="!couponInput.trim()"
+              @click="handleApplyCoupon"
+            >
+              Apply
+            </button>
           </div>
         </div>
 

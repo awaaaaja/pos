@@ -80,15 +80,17 @@ export async function printReceipt(text: string): Promise<boolean> {
   try {
     // Try Web Serial API (USB printers)
     if ("serial" in navigator) {
-      const port = await (navigator as { serial?: { requestPort: () => Promise<SerialPort> } }).serial?.requestPort();
+      // ponytail: SerialPort type not in DOM lib, cast via unknown
+      const port = await (navigator as { serial?: { requestPort: () => Promise<unknown> } }).serial?.requestPort();
       if (port) {
-        await port.open({ baudRate: 9600 });
-        const writer = port.writable?.getWriter();
+        const p = port as { open: (opts: { baudRate: number }) => Promise<void>; writable?: { getWriter: () => { write: (data: Uint8Array) => Promise<void>; releaseLock: () => void } }; close: () => Promise<void> };
+        await p.open({ baudRate: 9600 });
+        const writer = p.writable?.getWriter();
         if (writer) {
           const encoder = new TextEncoder();
           await writer.write(encoder.encode(text));
           await writer.releaseLock();
-          await port.close();
+          await p.close();
           return true;
         }
       }

@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useCartStore } from "@/modules/pos/stores/cart";
 import { getOrderWithItems, createPayment } from "@/modules/pos/services/payment";
+import { useToast } from "@/composables/useToast";
 import VoidApprovalModal from "@/modules/pos/components/VoidApprovalModal.vue";
 import RefundModal from "@/modules/pos/components/RefundModal.vue";
 import {
@@ -13,6 +14,9 @@ import {
   Building2,
 } from "lucide-vue-next";
 import type { PaymentMethod } from "@/types";
+import { generateReceipt, printReceipt } from "@/services/printer";
+
+const toast = useToast();
 
 const route = useRoute();
 const router = useRouter();
@@ -59,7 +63,7 @@ const methods: { value: PaymentMethod; label: string; icon: typeof Banknote }[] 
   { value: "transfer", label: "Transfer", icon: Building2 },
 ];
 
-const quickAmounts = [50000, 100000, 150000, 200000];
+const quickAmounts = [25000, 30000, 40000, 50000, 100000];
 
 onMounted(async () => {
   // If we have an orderId in route, load that order
@@ -89,14 +93,14 @@ async function handlePay() {
 
   const oId = orderId.value || cart.holdOrderId;
   if (!oId) {
-    alert("No order to pay");
+    toast.error("No order to pay");
     submitting.value = false;
     return;
   }
 
   const result = await createPayment(oId, method.value, total.value, referenceNumber.value);
   if (result.error) {
-    alert("Payment failed: " + result.error);
+    toast.error("Payment failed: " + result.error);
     submitting.value = false;
     return;
   }
@@ -105,10 +109,38 @@ async function handlePay() {
   const { completeOrder } = await import("@/modules/pos/services/payment");
   const completeResult = await completeOrder(oId);
   if (completeResult.error) {
-    alert("Payment recorded but order completion failed: " + completeResult.error);
+    toast.error("Payment recorded but order completion failed: " + completeResult.error);
+    submitting.value = false;
+    return;
   }
 
   cart.clearCart();
+
+  // Auto-print receipt
+  const receiptText = generateReceipt({
+    storeName: "KopiPOS",
+    storeAddress: "Jl. Kopi No. 1",
+    storePhone: "",
+    invoiceNumber: (order.value?.invoice_number as string) || "",
+    date: new Date().toLocaleString("id-ID"),
+    cashier: "",
+    items: orderItems.value.map((i) => ({
+      name: (i.product as { name: string } | undefined)?.name || "Item",
+      qty: i.quantity as number,
+      price: i.unit_price as number,
+      subtotal: i.subtotal as number,
+    })),
+    subtotal: subtotal.value,
+    discount: discount.value,
+    tax: tax.value,
+    serviceCharge: serviceCharge.value,
+    total: total.value,
+    paymentMethod: method.value,
+    amountPaid: method.value === "cash" ? receivedAmount.value : total.value,
+    change: cashChange.value,
+  });
+  await printReceipt(receiptText);
+
   router.push("/cashier");
 }
 
@@ -203,7 +235,7 @@ function getItemName(item: Record<string, unknown>): string {
           :placeholder="`Min ${total}`"
           class="w-full rounded-lg border border-gray-300 px-3 py-3 text-lg font-semibold focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <div class="mt-3 flex gap-2">
+        <div class="mt-3 flex flex-wrap gap-2">
           <button
             v-for="amt in quickAmounts"
             :key="amt"
@@ -211,6 +243,12 @@ function getItemName(item: Record<string, unknown>): string {
             @click="receivedAmount = amt"
           >
             {{ formatCurrency(amt) }}
+          </button>
+          <button
+            class="rounded-lg border border-primary bg-primary/5 px-3 py-1 text-sm font-medium text-primary hover:bg-primary/10"
+            @click="receivedAmount = total"
+          >
+            Exact
           </button>
         </div>
         <div v-if="receivedAmount >= total" class="mt-3 rounded-lg bg-green-50 p-3 text-center">

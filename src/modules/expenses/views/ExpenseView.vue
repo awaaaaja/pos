@@ -3,7 +3,10 @@ import { onMounted, ref } from "vue";
 import { getExpenses, createExpense, deleteExpense } from "@/modules/expenses/services/expense";
 import { supabase } from "@/services/supabase";
 import { logAuditEvent } from "@/modules/auth/services/auth";
+import { useToast } from "@/composables/useToast";
 import type { Expense } from "@/types";
+
+const toast = useToast();
 
 const expenses = ref<Expense[]>([]);
 const loading = ref(false);
@@ -67,7 +70,7 @@ async function handleCreate() {
 
   const r = await createExpense({ ...form.value, attachment_url: attachmentUrl });
   if (r.error) {
-    alert(r.error);
+    toast.error(r.error);
     return;
   }
   expenses.value.unshift(r.data!);
@@ -84,7 +87,7 @@ async function handleDelete(id: string) {
   if (!confirm("Delete this expense?")) return;
   const r = await deleteExpense(id);
   if (r.error) {
-    alert(r.error);
+    toast.error(r.error);
     return;
   }
   expenses.value = expenses.value.filter((e) => e.id !== id);

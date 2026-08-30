@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { fetchRecipes, createRecipe, updateRecipeItems, deleteRecipe } from "@/modules/recipes/services/recipe";
+import { fetchRecipes, createRecipe, deleteRecipe } from "@/modules/recipes/services/recipe";
 import { fetchIngredients } from "@/modules/inventory/services/ingredient";
 import { getActiveProducts } from "@/modules/products/services/product";
 import type { Recipe, Ingredient, Product } from "@/types";

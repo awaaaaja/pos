@@ -11,35 +11,63 @@ export interface DashboardMetrics {
   paymentBreakdown: { method: string; count: number; total: number }[];
 }
 
-export async function getDashboardMetrics(): Promise<DashboardMetrics> {
+export async function getDashboardMetrics(outletId?: string): Promise<DashboardMetrics> {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-  const [ordersToday, ordersMonth, topProducts, lowStock, payments] = await Promise.all([
-    supabase
-      .from("orders")
-      .select("total")
-      .gte("created_at", todayStart)
-      .in("status", ["completed"]),
-    supabase
-      .from("orders")
-      .select("total")
-      .gte("created_at", monthStart)
-      .in("status", ["completed"]),
-    supabase
-      .from("order_items")
-      .select("quantity, subtotal, product:products(name)")
-      .gte("created_at", monthStart),
+  // Build queries with optional outlet scoping
+  const ordersTodayQuery = supabase
+    .from("orders")
+    .select("total")
+    .gte("created_at", todayStart)
+    .in("status", ["completed"]);
+  const ordersMonthQuery = supabase
+    .from("orders")
+    .select("total")
+    .gte("created_at", monthStart)
+    .in("status", ["completed"]);
+  const paymentsQuery = supabase
+    .from("payments")
+    .select("method, amount")
+    .gte("created_at", monthStart);
+
+  if (outletId) {
+    ordersTodayQuery.eq("outlet_id", outletId);
+    ordersMonthQuery.eq("outlet_id", outletId);
+    // payments scoped through orders
+    const { data: orderIds } = await supabase.from("orders").select("id").eq("outlet_id", outletId);
+    if (orderIds?.length) {
+      paymentsQuery.in("order_id", orderIds.map((o) => o.id));
+    } else {
+      paymentsQuery.in("order_id", ["00000000-0000-0000-0000-000000000000"]);
+    }
+  }
+
+  const [ordersToday, ordersMonth, lowStock, payments] = await Promise.all([
+    ordersTodayQuery,
+    ordersMonthQuery,
     supabase
       .from("ingredients")
       .select("name, stock, minimum_stock")
       .eq("is_active", true),
-    supabase
-      .from("payments")
-      .select("method, amount")
-      .gte("created_at", monthStart),
+    paymentsQuery,
   ]);
+
+  // Top products — scope via orders if outlet specified
+  let topProductsQuery = supabase
+    .from("order_items")
+    .select("quantity, subtotal, product:products(name)")
+    .gte("created_at", monthStart);
+  if (outletId) {
+    const { data: orderIds } = await supabase.from("orders").select("id").eq("outlet_id", outletId);
+    if (orderIds?.length) {
+      topProductsQuery = topProductsQuery.in("order_id", orderIds.map((o) => o.id));
+    } else {
+      topProductsQuery = topProductsQuery.in("order_id", ["00000000-0000-0000-0000-000000000000"]);
+    }
+  }
+  const topProducts = await topProductsQuery;
 
   const todayOrders = ordersToday.data ?? [];
   const monthOrders = ordersMonth.data ?? [];
@@ -53,7 +81,8 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   // Top products
   const productMap = new Map<string, { name: string; qty: number; revenue: number }>();
   for (const item of topProducts.data ?? []) {
-    const name = (item.product as { name: string } | null)?.name ?? "Unknown";
+    const product = item.product as unknown as { name: string } | null;
+    const name = product?.name ?? "Unknown";
     const existing = productMap.get(name) ?? { name, qty: 0, revenue: 0 };
     existing.qty += item.quantity;
     existing.revenue += item.subtotal;
@@ -66,7 +95,8 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const lowStockList = allIngredients
     .filter((i) => i.stock <= i.minimum_stock)
     .sort((a, b) => a.stock - b.stock)
-    .slice(0, 5);
+    .slice(0, 5)
+    .map((i) => ({ name: i.name as string, stock: i.stock as number, minimum: i.minimum_stock as number }));
 
   // Payment breakdown
   const methodMap = new Map<string, { count: number; total: number }>();

@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import type { TableStatus } from "@/types";
+import { supabase } from "@/services/supabase";
 import {
   getTables,
   createTable,
@@ -15,9 +16,15 @@ export const useTableStore = defineStore("tables", () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  async function fetchTables() {
+  async function fetchTables(outletId?: string) {
     loading.value = true;
-    const result = await getTables();
+    // If no outletId passed, get from current user's profile
+    if (!outletId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase.from("profiles").select("outlet_id").eq("id", user?.id).single();
+      outletId = profile?.outlet_id ?? undefined;
+    }
+    const result = await getTables(outletId);
     if (result.error) {
       error.value = result.error;
     } else {

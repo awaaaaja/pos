@@ -147,14 +147,19 @@ export interface Order {
   table_id: string | null;
   customer_id: string | null;
   cashier_id: string | null;
+  outlet_id: string | null;
   status: OrderStatus;
   subtotal: number;
   discount: number;
+  discount_type: string | null;
+  coupon_id: string | null;
+  promo_id: string | null;
   tax: number;
   service_charge: number;
   total: number;
   notes: string | null;
   created_at: string;
+  updated_at: string | null;
   completed_at: string | null;
 }
 
@@ -162,9 +167,11 @@ export interface OrderItem {
   id: string;
   order_id: string;
   product_id: string;
+  product_name: string;
   variant_id: string | null;
   quantity: number;
   unit_price: number;
+  modifier_total: number;
   discount: number;
   subtotal: number;
   notes: string | null;

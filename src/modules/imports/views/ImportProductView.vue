@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { supabase } from "@/services/supabase";
-import { Upload, CheckCircle, AlertTriangle, X } from "lucide-vue-next";
+import { Upload, CheckCircle, AlertTriangle } from "lucide-vue-next";
 
 interface ParsedRow {
   sku: string;

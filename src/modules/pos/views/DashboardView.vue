@@ -4,6 +4,7 @@ import {
   getDashboardMetrics,
   type DashboardMetrics,
 } from "@/modules/reports/services/dashboard";
+import { useAuthStore } from "@/modules/auth/stores/auth";
 import {
   DollarSign,
   ShoppingCart,
@@ -12,11 +13,15 @@ import {
   CreditCard,
 } from "lucide-vue-next";
 
+const auth = useAuthStore();
 const metrics = ref<DashboardMetrics | null>(null);
 const loading = ref(true);
 
 onMounted(async () => {
-  metrics.value = await getDashboardMetrics();
+  // Owner sees all outlets, others see their outlet only
+  const isOwner = auth.user?.profile.role === "owner";
+  const outletId = isOwner ? undefined : auth.user?.profile.outlet_id ?? undefined;
+  metrics.value = await getDashboardMetrics(outletId);
   loading.value = false;
 });
 

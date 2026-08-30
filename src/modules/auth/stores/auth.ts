@@ -66,8 +66,8 @@ export const useAuthStore = defineStore("auth", () => {
     user.value = result.data;
     loading.value = false;
 
-    // PIN login has no auth session — audit with actor_name instead
-    await logAuditEvent({ action: "login", detail: { method: "pin", user: result.data.profile.full_name } }).catch(() => {});
+    // PIN login audit
+    await logAuditEvent({ action: "login", detail: { method: "pin", user: result.data?.profile.full_name } }).catch(() => {});
     return true;
   }
 

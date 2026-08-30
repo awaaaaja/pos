@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { createBackup } from "@/modules/exports/services/backup";
-import { useAuthStore } from "@/modules/auth/stores/auth";
 import { Settings, Download, Shield, Store } from "lucide-vue-next";
 
-const auth = useAuthStore();
 const storeName = ref("KopiPOS");
 const storeAddress = ref("");
 const storePhone = ref("");
@@ -48,9 +46,6 @@ async function handleBackup() {
   backedUp.value = r.success;
 }
 
-function formatCurrency(n: number) {
-  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
-}
 </script>
 
 <template>

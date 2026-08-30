@@ -3,9 +3,11 @@ import { ref, onMounted } from "vue";
 import { CircleCheck } from "lucide-vue-next";
 import { supabase } from "@/services/supabase";
 import { useAuthStore } from "@/modules/auth/stores/auth";
+import { useToast } from "@/composables/useToast";
 import type { Product } from "@/types";
 
 const auth = useAuthStore();
+const toast = useToast();
 const products = ref<Product[]>([]);
 const loading = ref(false);
 const outletId = ref("");
@@ -54,7 +56,7 @@ async function handleConfirm() {
   if (!outletId.value) return;
   const diffItems = opnameItems.value.filter((i) => i.actual_qty !== i.system_qty);
   if (diffItems.length === 0) {
-    alert("No differences to record");
+    toast.warning("No differences to record");
     return;
   }
 
@@ -66,7 +68,7 @@ async function handleConfirm() {
     .single();
 
   if (opErr || !opname) {
-    alert(opErr?.message || "Failed");
+    toast.error(opErr?.message || "Failed");
     return;
   }
 
@@ -84,7 +86,7 @@ async function handleConfirm() {
     p_opname_id: opname.id,
   });
   if (rpcErr || rpcResult?.error) {
-    alert(rpcErr?.message || rpcResult?.error);
+    toast.error(rpcErr?.message || rpcResult?.error);
     return;
   }
 

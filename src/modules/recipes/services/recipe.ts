@@ -1,5 +1,5 @@
 import { supabase } from "@/services/supabase";
-import type { Recipe, RecipeItem } from "@/types";
+import type { Recipe } from "@/types";
 
 export async function fetchRecipes(): Promise<Recipe[]> {
   const { data, error } = await supabase

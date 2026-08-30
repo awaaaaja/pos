@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, onMounted, onUnmounted } from "vue";
 import type { KdsOrder } from "@/modules/kds/services/order";
 
 const props = defineProps<{
@@ -11,10 +11,18 @@ const emit = defineEmits<{
   ready: [orderId: string];
 }>();
 
+// ponytail: computed can't track Date.now() — use interval for live timer
+const now = ref(Date.now());
+let timer: ReturnType<typeof setInterval>;
+
+onMounted(() => {
+  timer = setInterval(() => { now.value = Date.now(); }, 1000);
+});
+onUnmounted(() => clearInterval(timer));
+
 const elapsed = computed(() => {
   const created = new Date(props.order.created_at).getTime();
-  const now = Date.now();
-  const diff = Math.floor((now - created) / 1000);
+  const diff = Math.floor((now.value - created) / 1000);
   const m = Math.floor(diff / 60);
   const s = diff % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
